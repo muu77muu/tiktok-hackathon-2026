@@ -1,19 +1,25 @@
 import { useState, useEffect, useRef } from "react";
+import { CiHeart } from "react-icons/ci";
+import { FaHeart } from "react-icons/fa"; // Imported filled heart icon
 
 // Flatten hierarchical category tree into a list with depth and path information
 function flattenCategories(tree, depth = 0, parentPath = "") {
   const result = [];
-  
+
   if (Array.isArray(tree)) {
     tree.forEach((node) => {
-      const currentPath = parentPath ? `${parentPath} > ${node.name}` : node.name;
+      const currentPath = parentPath
+        ? `${parentPath} > ${node.name}`
+        : node.name;
       result.push({ name: node.name, depth, path: currentPath });
       if (node.children && node.children.length > 0) {
-        result.push(...flattenCategories(node.children, depth + 1, currentPath));
+        result.push(
+          ...flattenCategories(node.children, depth + 1, currentPath),
+        );
       }
     });
   }
-  
+
   return result;
 }
 
@@ -30,6 +36,7 @@ export default function Catalog() {
   const [availableCategories, setAvailableCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [wishlist, setWishlist] = useState([]); // State to store array of wishlisted product IDs
   const dropdownRef = useRef(null);
 
   // Close dropdown when clicking outside
@@ -45,13 +52,36 @@ export default function Catalog() {
     };
   }, []);
 
+  // Fetch wishlist IDs on component mount
+  useEffect(() => {
+    const fetchWishlist = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/api/wishlists");
+        if (response.ok) {
+          const data = await response.json();
+          // Expecting data to be an array of IDs: ["id1", "id2"] or items containing IDs
+          const wishlistIds = Array.isArray(data)
+            ? data.map((item) =>
+                typeof item === "string" ? item : item.parent_asin,
+              )
+            : [];
+          setWishlist(wishlistIds);
+        }
+      } catch (err) {
+        console.error("Failed to fetch wishlist:", err);
+      }
+    };
+
+    fetchWishlist();
+  }, []);
+
   // Fetch available categories on component mount
   useEffect(() => {
     const fetchCategories = async () => {
       try {
         setCategoriesLoading(true);
         const response = await fetch(
-          "http://localhost:8000/api/products/debug/categories"
+          "http://localhost:8000/api/products/debug/categories",
         );
         if (response.ok) {
           const data = await response.json();
@@ -63,7 +93,7 @@ export default function Catalog() {
           console.error(
             "Failed to fetch categories:",
             response.status,
-            response.statusText
+            response.statusText,
           );
         }
       } catch (err) {
@@ -137,10 +167,40 @@ export default function Catalog() {
     setIsDropdownOpen(false);
   };
 
+  const handleWishlist = async (product_id) => {
+    try {
+      const url = `http://localhost:8000/api/wishlists/${product_id}`;
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update wishlist");
+      }
+      setWishlist((prevWishlist) =>
+        prevWishlist.includes(product_id)
+          ? prevWishlist.filter((id) => id !== product_id)
+          : [...prevWishlist, product_id],
+      );
+    } catch (err) {
+      console.error(err.message);
+      // Revert state if the request fails
+      setWishlist((prevWishlist) =>
+        prevWishlist.includes(product_id)
+          ? prevWishlist.filter((id) => id !== product_id)
+          : [...prevWishlist, product_id],
+      );
+    }
+  };
+
   const filteredCategories = availableCategories.filter(
     (cat) =>
       cat.name.toLowerCase().includes(categoryInput.toLowerCase()) ||
-      cat.path.toLowerCase().includes(categoryInput.toLowerCase())
+      cat.path.toLowerCase().includes(categoryInput.toLowerCase()),
   );
 
   return (
@@ -201,9 +261,6 @@ export default function Catalog() {
                         )}
                         {cat.name}
                       </span>
-                      {/* {cat.depth > 0 && (
-                        <span className="path-badge">{cat.path}</span>
-                      )} */}
                     </li>
                   ))
                 ) : (
@@ -228,32 +285,54 @@ export default function Catalog() {
       {!loading && !error && products.length > 0 && (
         <>
           <div className="products-grid">
-            {products.map((product) => (
-              <div key={product.product_id} className="product-card">
-                <p className="product-id">
-                  {product.product_id}{" "}
-                  <span className="category-subtitle">
-                    (
-                    {(() => {
-                      try {
-                        const categoryStr = product.category.replace(/'/g, '"');
-                        const categories = JSON.parse(categoryStr);
-                        return categories.slice(-1);
-                      } catch (e) {
-                        return product.category;
-                      }
-                    })()}
-                    )
-                  </span>
-                </p>
-                <h3>{product.title}</h3>
-                <p className={product.price ? "price" : "price-null"}>
-                  {product.price
-                    ? `$${parseFloat(product.price).toFixed(2)}`
-                    : "No Price Available"}
-                </p>
-              </div>
-            ))}
+            {products.map((product) => {
+              const isWishlisted = wishlist.includes(product.product_id);
+
+              return (
+                <div key={product.product_id} className="product-card">
+                  <p className="product-id">
+                    {product.product_id}{" "}
+                    <span className="category-subtitle">
+                      (
+                      {(() => {
+                        try {
+                          const categoryStr = product.category.replace(
+                            /'/g,
+                            '"',
+                          );
+                          const categories = JSON.parse(categoryStr);
+                          return categories.slice(-1);
+                        } catch (e) {
+                          return product.category;
+                        }
+                      })()}
+                      )
+                    </span>
+                  </p>
+                  <h3>{product.title}</h3>
+                  <p className={product.price ? "price" : "price-null"}>
+                    {product.price
+                      ? `$${parseFloat(product.price).toFixed(2)}`
+                      : "No Price Available"}
+                  </p>
+                  <button
+                    className="heart-btn"
+                    onClick={() => handleWishlist(product.product_id)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {isWishlisted ? (
+                      <FaHeart style={{ color: "#e63946", fontSize: "24px" }} />
+                    ) : (
+                      <CiHeart style={{ color: "#989595", fontSize: "28px" }} />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           <div className="pagination">
