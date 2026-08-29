@@ -7,6 +7,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+DEFAULTS = {
+    "STALL_URL": "http://localhost:8000",
+    "LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "LLM_MODEL": "gemma-4-31b-it",
+}
 
 class Settings:
     """Application settings and configuration."""
