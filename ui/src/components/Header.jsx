@@ -16,6 +16,12 @@ export default function Header({ currentPage, setCurrentPage }) {
           >
             Catalog
           </button>
+          <button
+            className={`nav-link ${currentPage === 'wishlist' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('wishlist')}
+          >
+            Wishlist
+          </button>
         </nav>
       </div>
     </header>

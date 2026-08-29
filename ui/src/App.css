@@ -364,3 +364,20 @@
     border-right-color: var(--border);
   }
 }
+.wishlist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.product-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.empty-wishlist {
+  text-align: center;
+  padding: 40px 0;
+}

@@ -72,6 +72,21 @@ def get_products_service() -> ProductsService:
     return ProductsService()
 
 
+@router.get("/wishlisted", response_model=PaginatedProductList)
+def get_wishlisted_products(
+    page: int = 1,
+    page_size: int = 20,
+    products_service: ProductsService = Depends(get_products_service)
+) -> PaginatedProductList:
+    """
+    Retrieve paginated products that have been added to the wishlist.
+    """
+    try:
+        data = products_service.get_wishlisted_products(page=page, page_size=page_size)
+        return PaginatedProductList(**data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch wishlisted products: {str(e)}")
+
 @router.get("/list", response_model=PaginatedProductList)
 async def list_products(
     page: int = 1,
