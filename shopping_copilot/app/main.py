@@ -1,13 +1,17 @@
 from fastapi import FastAPI
 
+from app.api.routes import router
+
 app = FastAPI(
     title="Shopping Copilot",
-    description="This is a CannotTok special edition",
+    description=("a CannotTok special"),
 )
 
+app.include_router(router, prefix="/api")
+
 @app.get("/health")
-async def health_check():
+async def health():
     return {
-        "status": "healthy",
+        "status": "ok",
         "service": "shopping-copilot",
     }
