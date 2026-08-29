@@ -1,9 +1,11 @@
 from typing import Optional
 import logging
+import math
 
 from app.core.config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
 
 
 class ProductsService:
@@ -11,6 +13,16 @@ class ProductsService:
     
     def __init__(self):
         self.client = get_supabase_client()
+
+    @staticmethod
+    def safe_parse_price(price_val):
+        """Helper to parse raw price string or float safely."""
+        if price_val is None:
+            return None
+        try:
+            return float(price_val)
+        except (ValueError, TypeError):
+            return None
     
     async def get_product(self, product_id: str) -> Optional[dict]:
         """
@@ -76,3 +88,66 @@ class ProductsService:
             .execute()
         )
         return {"action": "added", "data": response.data}
+    
+    def get_wishlisted_products(self, page: int = 1, page_size: int = 20):
+        # 1. Fetch all product IDs from the Wishlist table
+        wishlist_resp = self.client.table("Wishlist").select("parent_asin").execute()
+        wishlist_items = wishlist_resp.data or []
+        
+        product_ids = [item["parent_asin"].strip() for item in wishlist_items if item.get("parent_asin")]
+        total = len(product_ids)
+
+        if not product_ids:
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": 1
+            }
+
+        # 2. Paginate the product_ids list locally
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        page_ids = product_ids[start_idx:end_idx]
+
+        if not page_ids:
+            return {
+                "items": [],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": math.ceil(total / page_size) or 1
+            }
+
+        # 3. Fetch product details from Catalog table for the paginated IDs
+        products_resp = (
+            self.client.table("Catalog")
+            .select("parent_asin, title, categories, price, average_rating")
+            .in_("parent_asin", page_ids)
+            .execute()
+        )
+
+        catalog_data = products_resp.data or []
+
+        # 4. Map DB fields to match ProductItem schema
+        items = []
+        for prod in catalog_data:
+            items.append({
+                "product_id": prod.get("parent_asin"),
+                "title": prod.get("title"),
+                "category": prod.get("categories"),
+                "price": self.safe_parse_price(prod.get("price")),
+                "rating": prod.get("average_rating")
+            })
+
+        total_pages = math.ceil(total / page_size) or 1
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages
+        }
+
