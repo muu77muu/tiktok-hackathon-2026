@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
-// Flatten hierarchical category tree into a list with depth information
-function flattenCategories(tree, depth = 0) {
+// Flatten hierarchical category tree into a list with depth and path information
+function flattenCategories(tree, depth = 0, parentPath = "") {
   const result = [];
   
   if (Array.isArray(tree)) {
     tree.forEach((node) => {
-      result.push({ name: node.name, depth });
+      const currentPath = parentPath ? `${parentPath} > ${node.name}` : node.name;
+      result.push({ name: node.name, depth, path: currentPath });
       if (node.children && node.children.length > 0) {
-        result.push(...flattenCategories(node.children, depth + 1));
+        result.push(...flattenCategories(node.children, depth + 1, currentPath));
       }
     });
   }
@@ -25,8 +26,24 @@ export default function Catalog() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [categoryInput, setCategoryInput] = useState("");
   const [availableCategories, setAvailableCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   // Fetch available categories on component mount
   useEffect(() => {
@@ -101,29 +118,102 @@ export default function Catalog() {
     }
   };
 
-  const handleCategoryChange = (e) => {
-    setSelectedCategory(e.target.value);
+  const handleCategoryInputChange = (e) => {
+    const value = e.target.value;
+    setCategoryInput(value);
+    setSelectedCategory(value);
+    setIsDropdownOpen(true);
   };
+
+  const handleSelectCategory = (catName) => {
+    setCategoryInput(catName);
+    setSelectedCategory(catName);
+    setIsDropdownOpen(false);
+  };
+
+  const handleClearCategory = () => {
+    setCategoryInput("");
+    setSelectedCategory("");
+    setIsDropdownOpen(false);
+  };
+
+  const filteredCategories = availableCategories.filter(
+    (cat) =>
+      cat.name.toLowerCase().includes(categoryInput.toLowerCase()) ||
+      cat.path.toLowerCase().includes(categoryInput.toLowerCase())
+  );
 
   return (
     <main className="main">
       <div className="filters-section">
         <div className="filter-group">
           <label htmlFor="category-filter">Filter by Category:</label>
-          <select
-            id="category-filter"
-            value={selectedCategory}
-            onChange={handleCategoryChange}
-            className="category-select"
-            disabled={categoriesLoading}
-          >
-            <option value="">All Categories</option>
-            {availableCategories.map((cat, idx) => (
-              <option key={`${cat.name}-${idx}`} value={cat.name}>
-                {" - ".repeat(cat.depth)}{cat.name}
-              </option>
-            ))}
-          </select>
+          <div className="category-combobox" ref={dropdownRef}>
+            <div className="category-input-wrapper">
+              <input
+                id="category-filter"
+                type="text"
+                value={categoryInput}
+                onChange={handleCategoryInputChange}
+                onFocus={() => setIsDropdownOpen(true)}
+                placeholder="Type or select category..."
+                className="category-input"
+                disabled={categoriesLoading}
+                autoComplete="off"
+              />
+              {categoryInput && (
+                <button
+                  type="button"
+                  className="category-clear-btn"
+                  onClick={handleClearCategory}
+                  title="Clear category filter"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {isDropdownOpen && (
+              <ul className="category-dropdown">
+                <li
+                  className={`category-dropdown-item ${
+                    selectedCategory === "" ? "selected" : ""
+                  }`}
+                  onClick={() => handleSelectCategory("")}
+                >
+                  All Categories
+                </li>
+                {filteredCategories.length > 0 ? (
+                  filteredCategories.map((cat, idx) => (
+                    <li
+                      key={`${cat.name}-${idx}`}
+                      className={`category-dropdown-item ${
+                        selectedCategory === cat.name ? "selected" : ""
+                      }`}
+                      style={{ paddingLeft: `${12 + cat.depth * 16}px` }}
+                      onClick={() => handleSelectCategory(cat.name)}
+                    >
+                      <span className="category-item-text">
+                        {cat.depth > 0 && (
+                          <span className="depth-indent">
+                            {"\u00A0\u00A0".repeat(cat.depth)}
+                          </span>
+                        )}
+                        {cat.name}
+                      </span>
+                      {/* {cat.depth > 0 && (
+                        <span className="path-badge">{cat.path}</span>
+                      )} */}
+                    </li>
+                  ))
+                ) : (
+                  <li className="category-dropdown-item no-results">
+                    No matching categories found
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
 
