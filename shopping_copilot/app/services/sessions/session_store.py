@@ -2,10 +2,6 @@
 # in-memory storage for (requirement) conversational sessions.
 
 class SessionStore:
-    """
-    In-memory storage for isolated conversational sessions.
-    """
-
     def __init__(self):
         self.sessions: dict[str, object] = {}
 

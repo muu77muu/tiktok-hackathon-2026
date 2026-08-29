@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 @dataclass
 class SessionState:
-
     session_id: str
     turn_count: int = 0
     intent: str | None = None
