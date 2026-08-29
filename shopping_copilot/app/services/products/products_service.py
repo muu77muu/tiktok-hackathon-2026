@@ -45,3 +45,34 @@ class ProductsService:
             # Log the error for debugging
             logger.error(f"Error fetching product {product_id}: {str(e)}", exc_info=True)
             return None
+
+    def get_wishlist(self):
+        response = self.client.table("Wishlist").select("parent_asin").execute()
+        return response.data
+
+    def update_wishlist(self, product_id: str):
+        # 1. Check if product exists in wishlist (No await)
+        existing = (
+            self.client.table("Wishlist")
+            .select("*")
+            .eq("parent_asin", product_id)
+            .execute()
+        )
+
+        # 2. If it exists, delete it
+        if existing.data:
+            response = (
+                self.client.table("Wishlist")
+                .delete()
+                .eq("parent_asin", product_id)
+                .execute()
+            )
+            return {"action": "removed", "data": response.data}
+
+        # 3. Otherwise, insert it
+        response = (
+            self.client.table("Wishlist")
+            .insert({"parent_asin": product_id})
+            .execute()
+        )
+        return {"action": "added", "data": response.data}
