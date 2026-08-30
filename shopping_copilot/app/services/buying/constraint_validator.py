@@ -1,14 +1,8 @@
 
 # to validate purchasing constraints before passing to retrieval layer
-
-# Validates extracted constraints before they're turned into search filters
-"""
-Distinguishes two failure modes that the pipeline treats very differently:
-  - "missing/ambiguous info"  -> ask the user (needs_clarification)
-  - "internally inconsistent" -> hard stop, explain why (validation error)
-"""
-
-from __future__ import annotations
+# distinguishes two failure modes that the pipeline treats very differently:
+#   - "missing/ambiguous info"  -> ask the user (needs_clarification)
+#   - "internally inconsistent" -> hard stop, explain why (validation error)
 
 from dataclasses import dataclass, field
 
@@ -50,9 +44,7 @@ class ConstraintValidator:
         if constraints.is_empty():
             return ValidationResult(
                 is_valid=False,
-                clarification_prompt=(
-                    L
-                ),
+                clarification_prompt=("What are you shopping for? A category, brand, or a few must-have features would help me narrow it down."),
                 clarification_fields=["category"],
             )
 

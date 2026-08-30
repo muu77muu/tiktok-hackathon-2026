@@ -1,24 +1,10 @@
 
 # to convert validated shopping constraints into structured catalog filters
 
-"""
-Translates a validated Constraints object into the filter dict shape your
-retrieval layer (metadata_filter.py / category_retriever.py) expects.
-This is the one place that knows about retrieval-layer filter syntax, so if
-that syntax changes, only this file needs to change.
-"""
-
-from __future__ import annotations
-
 from .constraint_extractor import Constraints
 
 class FilterBuilder:
     def __init__(self, attribute_field_map: dict[str, str] | None = None):
-        """
-        attribute_field_map: optional mapping from Constraints.attributes
-        keys (e.g. "color") to the actual indexed field name (e.g.
-        "product.color_normalized"), in case they differ.
-        """
         self.attribute_field_map = attribute_field_map or {}
 
     async def build(self, constraints: Constraints) -> dict:
@@ -70,7 +56,6 @@ class FilterBuilder:
             range_value["lte"] = hi
         return {"field": "price", "op": "range", "value": range_value}
 
+    # drop empty clause lists 
     def _clean(self, filters: dict) -> dict:
-        """Drop empty clause lists so downstream code doesn't need to
-        special-case empty must/should/must_not arrays."""
         return {k: v for k, v in filters.items() if v}

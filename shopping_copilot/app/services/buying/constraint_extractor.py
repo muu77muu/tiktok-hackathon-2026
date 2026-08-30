@@ -10,10 +10,9 @@ class PriceRange:
     max_price: float | None = None
     currency: str = "USD"
 
+# structured representation of what buyers are looking for
 @dataclass
 class Constraints:
-    """Structured representation of what the user is looking for."""
-
     category: str | None = None
     subcategory: str | None = None
     price: PriceRange = field(default_factory=PriceRange)
@@ -39,7 +38,6 @@ class Constraints:
             ]
         )
 
-
 EXTRACTION_SCHEMA_HINT = """
 Return a JSON object with this shape (omit fields you can't infer):
 {
@@ -57,13 +55,8 @@ Return a JSON object with this shape (omit fields you can't infer):
 }
 """
 
-
 class ConstraintExtractor:
     def __init__(self, llm_client=None, prompt_template: str | None = None):
-        """
-        llm_client: object exposing `.complete(system: str, user: str) -> str` (raw JSON text)
-        prompt_template: system prompt for extraction; falls back to a default if not provided.
-        """
         self.llm_client = llm_client
         self.prompt_template = prompt_template or self._default_prompt()
 
@@ -87,8 +80,7 @@ class ConstraintExtractor:
 
         constraints = self._to_constraints(parsed, raw_query=query)
 
-        # Merge with prior turn's constraints so a follow-up like
-        # "actually under $50" refines rather than replaces context.
+        # Merge with prior turn's constraints so a follow-up like "actually under $50" refines rather than replaces context.
         if prior_constraints:
             constraints = self._merge(prior_constraints, constraints)
 
@@ -137,8 +129,6 @@ class ConstraintExtractor:
         )
 
     def _merge(self, prior: Constraints, new: Constraints) -> Constraints:
-        """New, explicitly-stated fields override prior ones; unset new
-        fields fall back to prior values."""
         merged = Constraints(**prior.__dict__)
         for f in (
             "category",
@@ -160,4 +150,5 @@ class ConstraintExtractor:
         merged.raw_query = new.raw_query
         merged.confidence = new.confidence
         merged.ambiguous_fields = new.ambiguous_fields
+
         return merged
