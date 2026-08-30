@@ -9,7 +9,6 @@ from .feedback import router as feedback_router
 from .evaluation import router as evaluation_router
 from .wishlist import router as wishlist_router
 
-
 router = APIRouter()
 
 router.include_router(chat_router)

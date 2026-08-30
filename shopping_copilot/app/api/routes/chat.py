@@ -1,9 +1,9 @@
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from ..dependencies import get_copilot_service
-from shopping_copilot.app.services.orchestration.agent_service import CopilotService
-
+from ..dependencies import get_orchestration_service, get_session_service
+from app.services.orchestration.orchestration_service import OrchestrationService
+from app.services.sessions.sessions_service import SessionService
 
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
@@ -21,15 +21,32 @@ class ChatResponse(BaseModel):
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-@router.post("", response_model=ChatResponse,)
+@router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    copilot: CopilotService = Depends(get_copilot_service),
+    orchestration: OrchestrationService = Depends(get_orchestration_service),
+    sessions: SessionService = Depends(get_session_service),
 ) -> ChatResponse:
+    if sessions.exists(request.session_id):
+        ok, reason = sessions.check_limits(request.session_id)
+        if not ok:
+            raise HTTPException(status_code=410, detail=f"session_unavailable: {reason}")
 
-    result = await copilot.process(
-        session_id=request.session_id,
-        message=request.message,
+    try:
+        turn = await orchestration.handle_turn(
+            session_id=request.session_id,
+            message=request.message,
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="something went wrong processing that message")
+
+    payload = turn.get("result", {})
+
+    return ChatResponse(
+        session_id=turn["session_id"],
+        intent=turn.get("intent"),
+        message=payload.get("message"),
+        response=payload.get("message"),
+        recommendations=payload.get("products", []),
+        status=payload.get("status", "ok"),
     )
-
-    return ChatResponse(**result)

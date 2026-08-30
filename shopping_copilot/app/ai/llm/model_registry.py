@@ -1,40 +1,12 @@
-from dataclasses import dataclass
+from app.core.config import get_settings
 
+LLM_MODEL = get_settings().LLM_MODEL
 
-@dataclass(frozen=True)
-class ModelConfig:
-    name: str
-    provider: str
-    temperature: float = 0.0
-    max_tokens: int = 1024
+TASK_MODELS: dict[str, str] = {
+    "extraction": LLM_MODEL,
+    "llm_ranking": LLM_MODEL,
+    "scenario_analysis": LLM_MODEL,
+}
 
-# to register and manage LLM model configurations
-
-class ModelRegistry:
-    def __init__(self):
-        self._models: dict[str, ModelConfig] = {}
-
-    def register(
-        self,
-        role: str,
-        config: ModelConfig,
-    ) -> None:
-        self._models[role] = config
-
-    def get(
-        self,
-        role: str,
-    ) -> ModelConfig | None:
-        return self._models.get(role)
-
-    def has(
-        self,
-        role: str,
-    ) -> bool:
-        return role in self._models
-
-    def remove(
-        self,
-        role: str,
-    ) -> None:
-        self._models.pop(role, None)
+def get_model_for_task(task: str) -> str:
+    return TASK_MODELS.get(task, LLM_MODEL)

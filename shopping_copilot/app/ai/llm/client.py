@@ -1,44 +1,72 @@
-from typing import Any
+import asyncio
+import logging
 
-from .model_registry import ModelRegistry
+from openai import AsyncOpenAI, APIError, APITimeoutError
 
-# provider-agnostic LLM client
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 class LLMClient:
     def __init__(
         self,
-        model_registry: ModelRegistry | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
+        max_retries: int | None = None,
     ):
-        self.model_registry = (
-            model_registry or ModelRegistry()
+        settings = get_settings()
+
+        if not (api_key or settings.LLM_API_KEY):
+            raise ValueError("No LLM API key configured. Set LLM_API_KEY in your environment.")
+
+        self.model = model or settings.LLM_MODEL
+        self.max_retries = max_retries if max_retries is not None else settings.LLM_MAX_RETRIES
+
+        self._client = AsyncOpenAI(
+            api_key=api_key or settings.LLM_API_KEY,
+            base_url=base_url or settings.LLM_BASE_URL,
+            timeout=timeout or settings.LLM_TIMEOUT_SECONDS,
         )
 
-    # generate text from a prompt
-    async def generate(
+    async def complete(
         self,
-        prompt: str,
-        system_prompt: str | None = None,
-        model: str | None = None,
-        temperature: float = 0.0,
+        system: str,
+        user: str,
+        temperature: float = 0.3,
         max_tokens: int | None = None,
-        **kwargs: Any,
-    ) -> str:
-
-        raise NotImplementedError(
-            "LLM provider has not been configured."
-        )
-
-    # generate structured output from a prompt
-    async def generate_structured(
-        self,
-        prompt: str,
-        output_schema: dict[str, Any],
-        system_prompt: str | None = None,
         model: str | None = None,
-        temperature: float = 0.0,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> str:
+        last_error: Exception | None = None
 
-        raise NotImplementedError(
-            "Structured LLM provider has not been configured."
-        )
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=model or self.model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                content = response.choices[0].message.content
+                if content is None:
+                    raise ValueError("LLM returned empty completion content")
+                return content
+
+            except (APIError, APITimeoutError, ValueError) as exc:
+                last_error = exc
+                logger.warning(
+                    "LLM call failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    exc,
+                )
+                if attempt < self.max_retries:
+                    await asyncio.sleep((2 ** attempt) * 0.5)
+
+        raise RuntimeError(
+            f"LLM completion failed after {self.max_retries + 1} attempts"
+        ) from last_error
