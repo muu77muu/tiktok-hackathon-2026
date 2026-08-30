@@ -1,4 +1,4 @@
-from shopping_copilot.app.services.agent.agent_service import CopilotService
+from shopping_copilot.app.services.orchestration.agent_service import CopilotService
 from app.services.sessions.sessions_service import SessionService
 from app.services.ranking.ranking_service import RankingService
 
@@ -13,7 +13,7 @@ def get_session_service() -> SessionService:
     return _session_service
 
 def get_recommendation_service():
-    from app.services.agent.recommendation_service import RecommendationService
+    from app.services.orchestration.recommendation_service import RecommendationService
     return RecommendationService(ranking_service=_ranking_service)
 
 def get_search_service():

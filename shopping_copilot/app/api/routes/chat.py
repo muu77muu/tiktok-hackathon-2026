@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends
 
 from ..dependencies import get_copilot_service
-from shopping_copilot.app.services.agent.agent_service import CopilotService
+from shopping_copilot.app.services.orchestration.agent_service import CopilotService
 
 
 class ChatRequest(BaseModel):

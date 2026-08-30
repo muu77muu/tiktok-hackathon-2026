@@ -1,12 +1,14 @@
+
+# to coordinate agent's runtime workflow
+
 from .clarification_service import ClarificationService
 from .context_manager import ContextManager
 from .conversation_manager import ConversationManager
 from .intent_router import IntentRouter
 from .recommendation_service import RecommendationService
 from .state_manager import StateManager
-from .workflow.workflow_decision import WorkflowDecision
+from .workflow_decision import WorkflowDecision
 
-# coordiantes agent's runtime workflow
 class OrchestrationService:
     def __init__(
         self,
@@ -35,8 +37,8 @@ class OrchestrationService:
         session_id: str,
         message: str,
     ) -> dict:
-        context = await self.context_manager.get_context(session_id)
         state = await self.state_manager.get_state(session_id)
+        context = await self.context_manager.get_context(session_id, message)
 
         await self.conversation_manager.record_user_message(
             session_id=session_id,
@@ -71,6 +73,12 @@ class OrchestrationService:
             },
         )
 
+        await self.conversation_manager.record_assistant_message(
+            session_id=session_id,
+            message=result.get("message", ""),
+            pipeline_result=result.get("pipeline_result"),
+        )
+
         return {
             "session_id": session_id,
             "intent": intent,
@@ -78,7 +86,7 @@ class OrchestrationService:
             "result": result,
         }
 
-    # to transflate intent and state into next workflow action
+    # to translate intent and state into next workflow action
     def _make_decision(
         self,
         intent: str,
@@ -90,7 +98,7 @@ class OrchestrationService:
                 intent=intent,
                 reason="High-intent purchasing request detected.",
             )
-        
+
         elif intent == "browsing":
             return WorkflowDecision(
                 action="browsing",
@@ -113,28 +121,41 @@ class OrchestrationService:
         state: dict,
     ) -> dict:
 
-        if (decision.action == "buying" and self.buying_pipeline
-        ):
-            return await self.buying_pipeline.run(
-                query=message,
-                context=context,
-            )
+        if decision.action == "buying" and self.buying_pipeline:
+            pipeline_result = await self.buying_pipeline.run(query=message, context=context)
+            return await self._handle_pipeline_result(pipeline_result, message, context, state)
 
-        if (decision.action == "browsing" and self.browsing_pipeline
-        ):
-            return await self.browsing_pipeline.run(
-                query=message,
-                context=context,
-            )
+        if decision.action == "browsing" and self.browsing_pipeline:
+            pipeline_result = await self.browsing_pipeline.run(query=message, context=context)
+            return await self._handle_pipeline_result(pipeline_result, message, context, state)
 
         if decision.action == "clarify":
-            return await self.clarification_service.generate(
+            clarification = await self.clarification_service.generate(
                 message=message,
                 context=context,
                 state=state,
             )
+            return clarification
 
         return {
             "status": "no_pipeline_configured",
             "action": decision.action,
+            "message": "",
         }
+
+    async def _handle_pipeline_result(
+        self, pipeline_result: dict, message: str, context: dict, state: dict
+    ) -> dict:
+        if pipeline_result.get("status") == "needs_clarification":
+            clarification = await self.clarification_service.generate(
+                message=message,
+                context=context,
+                state=state,
+                clarification_prompt=pipeline_result.get("clarification_prompt"),
+            )
+            clarification["pipeline_result"] = pipeline_result
+            return clarification
+
+        formatted = await self.recommendation_service.present(pipeline_result, context)
+        formatted["pipeline_result"] = pipeline_result
+        return formatted
