@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# TechJam local evaluator artifacts
+/data/catalog.jsonl
+/results.json
