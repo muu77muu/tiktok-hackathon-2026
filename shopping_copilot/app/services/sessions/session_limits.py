@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from .session_state import SessionState
 
-DEFAULT_MAX_TURNS = 40
+DEFAULT_MAX_TURNS = 10
 DEFAULT_IDLE_TIMEOUT = timedelta(minutes=30)
 DEFAULT_MAX_SESSION_AGE = timedelta(hours=6)
 

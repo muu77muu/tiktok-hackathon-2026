@@ -1,7 +1,17 @@
+
+# Buying pipeline: each stage can short-circuit the pipeline (eg. by requesting clarification or failing validation) without downstream stages needing to know why.
+# Expected collaborator interfaces (duck-typed, so you can swap implementations):
+#    constraint_extractor.extract(query: str, context: dict) -> Constraints
+#    constraint_validator.validate(constraints: Constraints) -> ValidationResult
+#    filter_builder.build(constraints: Constraints) -> dict  # search filters
+#    strategy.execute(filters: dict, constraints: Constraints, context: dict) -> list[Candidate]
+
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from app.core.exceptions import OverGeneralityDetected
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +65,7 @@ class BuyingPipeline:
         context = context or {}
         result = PipelineResult(query=query, context=context)
 
-        # 1: extract constraints from the query
+        # Stage 1: extract constraints from the query
         try:
             constraints = await self.constraint_extractor.extract(query, context)
             result.constraints = constraints
@@ -65,7 +75,7 @@ class BuyingPipeline:
             result.errors.append(f"extraction_failed: {exc}")
             return result.to_dict()
 
-        # 2: validate constraints (missing/conflicting info) --
+        # Stage 2: validate constraints (missing/conflicting info)
         try:
             validation = await self.constraint_validator.validate(constraints)
         except Exception as exc:
@@ -83,7 +93,7 @@ class BuyingPipeline:
                 result.errors.extend(validation.errors)
             return result.to_dict()
 
-        # 3: build search filters from validated constraints 
+        # Stage 3: build search filters from validated constraints
         try:
             filters = await self.filter_builder.build(constraints)
             result.filters = filters
@@ -93,11 +103,16 @@ class BuyingPipeline:
             result.errors.append(f"filter_build_failed: {exc}")
             return result.to_dict()
 
-        # 4: execute retrieval/ranking strategy
+        # Stage 4: execute retrieval/ranking strategy 
         try:
             candidates = await self.strategy.execute(
                 filters=filters, constraints=constraints, context=context
             )
+        except OverGeneralityDetected as exc:
+            # Retrieval cutoff, the candidate pool was too scattered to rank meaningfully, so the strategy raised before spending any ranking budget on it. 
+            result.status = PipelineStatus.NEEDS_CLARIFICATION
+            result.clarification_prompt = exc.prompt
+            return result.to_dict()
         except Exception as exc:
             logger.exception("strategy execution failed")
             result.status = PipelineStatus.ERROR
@@ -105,7 +120,5 @@ class BuyingPipeline:
             return result.to_dict()
 
         result.candidates = candidates or []
-        result.status = (
-            PipelineStatus.OK if result.candidates else PipelineStatus.NO_RESULTS
-        )
+        result.status = (PipelineStatus.OK if result.candidates else PipelineStatus.NO_RESULTS)
         return result.to_dict()
