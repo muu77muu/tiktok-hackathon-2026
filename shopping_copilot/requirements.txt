@@ -2,3 +2,7 @@ fastapi
 pydantic
 dotenv
 supabase
+openai
+torch
+transformers>=4.51
+sentence-transformers>=2.7

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from app.core.config import get_settings
+
 # configuration for an embedding model
 @dataclass(frozen=True)
 class EmbeddingModelConfig:
@@ -24,3 +26,23 @@ class EmbeddingModelRegistry:
         role: str,
     ) -> EmbeddingModelConfig | None:
         return self._models.get(role)
+
+
+_registry = EmbeddingModelRegistry()
+_settings = get_settings()
+
+_registry.register(
+    "active",
+    EmbeddingModelConfig(
+        name=_settings.EMBEDDING_MODEL,
+        provider="local",
+        dimensions=_settings.EMBEDDING_DIMENSIONS,
+    ),
+)
+
+
+def get_active_embedding_model() -> EmbeddingModelConfig:
+    config = _registry.get("active")
+    if config is None:
+        raise RuntimeError("No active embedding model registered.")
+    return config

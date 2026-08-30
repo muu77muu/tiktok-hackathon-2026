@@ -1,69 +1,63 @@
 import asyncio
 import logging
-
-from openai import AsyncOpenAI, APIError, APITimeoutError
+import threading
 
 from app.core.config import get_settings
 from .model_registry import get_active_embedding_model
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_RETRIES = 2
-
+# Local embedding via Qwen3-Embedding-0.6B (sentence-transformers).
+# Qwen3-Embedding is instruction-aware: queries are encoded with the model's
+# built-in "query" prompt, documents without it -- mixing them up degrades
+# retrieval quality, hence the explicit is_query flags below.
 class Embedder:
     def __init__(
         self,
-        api_key: str | None = None,
-        base_url: str | None = None,
         model: str | None = None,
-        timeout: float | None = None,
-        max_retries: int = DEFAULT_MAX_RETRIES,
+        device: str | None = None,
     ):
         settings = get_settings()
 
-        if not (api_key or settings.LLM_API_KEY):
-            raise ValueError("No embedding API key configured. Set LLM_API_KEY.")
+        self.model_name = model or get_active_embedding_model().name
+        self.device = device or settings.EMBEDDING_DEVICE or None
+        self._model = None
+        self._lock = threading.Lock()
 
-        self.model = model or get_active_embedding_model().name
-        self.max_retries = max_retries
+    def _get_model(self):
+        # lazy singleton: loading ~1.2GB of weights at import time would slow
+        # every process start (tests, scripts) that never embeds anything
+        if self._model is None:
+            with self._lock:
+                if self._model is None:
+                    from sentence_transformers import SentenceTransformer
 
-        self._client = AsyncOpenAI(
-            api_key=api_key or settings.LLM_API_KEY,
-            base_url=base_url or settings.LLM_BASE_URL,
-            timeout=timeout or settings.LLM_TIMEOUT_SECONDS,
-        )
+                    logger.info("loading embedding model %s", self.model_name)
+                    self._model = SentenceTransformer(
+                        self.model_name, device=self.device
+                    )
+        return self._model
 
-    async def embed(self, text: str) -> list[float]:
-        last_error: Exception | None = None
+    def _encode(self, texts: list[str], is_query: bool) -> list[list[float]]:
+        model = self._get_model()
+        kwargs: dict = {"normalize_embeddings": True}
+        if is_query:
+            kwargs["prompt_name"] = "query"
+        embeddings = model.encode(texts, **kwargs)
+        return embeddings.tolist()
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                response = await self._client.embeddings.create(model=self.model, input=text)
-                return response.data[0].embedding
-            except (APIError, APITimeoutError) as exc:
-                last_error = exc
-                logger.warning(
-                    "embedding call failed (attempt %d/%d): %s",
-                    attempt + 1,
-                    self.max_retries + 1,
-                    exc,
-                )
-                if attempt < self.max_retries:
-                    await asyncio.sleep((2 ** attempt) * 0.5)
+    async def embed(self, text: str, *, is_query: bool = True) -> list[float]:
+        # to_thread keeps the event loop free during model inference
+        [vector] = await asyncio.to_thread(self._encode, [text], is_query)
+        return vector
 
-        raise RuntimeError(
-            f"embedding failed after {self.max_retries + 1} attempts"
-        ) from last_error
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Batches into one API call rather than N sequential ones --
+    async def embed_batch(
+        self, texts: list[str], *, is_query: bool = False
+    ) -> list[list[float]]:
+        """Batches into one forward pass rather than N sequential ones --
         mainly for scripts/build_indexes.py embedding a full catalog, but
-        any bulk-embedding caller should prefer this over looping embed()."""
+        any bulk-embedding caller should prefer this over looping embed().
+        Defaults to document-style encoding (no query prompt)."""
         if not texts:
             return []
-        try:
-            response = await self._client.embeddings.create(model=self.model, input=texts)
-            return [d.embedding for d in response.data]
-        except (APIError, APITimeoutError):
-            logger.exception("batch embedding failed, falling back to per-item calls")
-            return [await self.embed(t) for t in texts]
+        return await asyncio.to_thread(self._encode, texts, is_query)

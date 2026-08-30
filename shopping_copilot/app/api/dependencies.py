@@ -1,6 +1,8 @@
 from functools import lru_cache
 
 from app.ai.llm.client import LLMClient
+from app.ai.embeddings.embedder import Embedder
+from app.ai.rerankers.reranker import Reranker
 
 # buying
 from app.services.buying.constraint_extractor import ConstraintExtractor
@@ -19,9 +21,11 @@ from app.services.browsing.browsing_pipeline import BrowsingPipeline
 
 # retrieval
 from app.services.retrieval.retrieval_service import RetrievalService
+from app.services.retrieval.vector_retriever import VectorRetriever
 
 # ranking
 from app.services.ranking.scoring import Scoring
+from app.services.ranking.cross_encoder import CrossEncoderReranker
 from app.services.ranking.llm_ranker import LLMRanker
 from app.services.ranking.diversification import Diversification
 from app.services.ranking.ranking_service import RankingService
@@ -50,6 +54,14 @@ def get_llm_client() -> LLMClient:
     return LLMClient()
 
 @lru_cache()
+def get_embedder() -> Embedder:
+    return Embedder()
+
+@lru_cache()
+def get_reranker() -> Reranker:
+    return Reranker()
+
+@lru_cache()
 def get_session_service() -> SessionService:
     return SessionService()
 
@@ -57,7 +69,10 @@ def get_session_service() -> SessionService:
 def get_retrieval_service() -> RetrievalService:
     return RetrievalService(
         keyword_retriever=None,  # TODO: wire infrastructure/search/keyword_index.py
-        vector_retriever=None,   # TODO: wire infrastructure/search/vector_index.py + ai/embeddings/embedder.py
+        vector_retriever=VectorRetriever(
+            vector_index=None,  # TODO: wire infrastructure/search/vector_index.py
+            embedder=get_embedder(),
+        ),
         category_retriever=None,  # TODO: wire infrastructure/search/category_index.py
     )
 
@@ -66,7 +81,7 @@ def get_ranking_service() -> RankingService:
     llm = get_llm_client()
     return RankingService(
         scoring=Scoring(),
-        cross_encoder=None,  # TODO: wire ai/rerankers/reranker.py
+        cross_encoder=CrossEncoderReranker(model_client=get_reranker()),
         llm_ranker=LLMRanker(llm_client=llm),
         diversification=Diversification(),
     )
@@ -80,7 +95,7 @@ def get_context_distiller() -> ContextDistiller:
         short_term_memory=ShortTermMemory(llm_client=llm),
         long_term_memory=long_term,
         preference_manager=PreferenceManager(long_term_memory=long_term),
-        context_relevance=ContextRelevance(embedder=None),  # TODO: wire ai/embeddings/embedder.py
+        context_relevance=ContextRelevance(embedder=get_embedder()),
     )
 
 @lru_cache()
@@ -103,7 +118,7 @@ def get_browsing_pipeline() -> BrowsingPipeline:
         scenario_analyzer=ScenarioAnalyzer(llm_client=llm),
         query_expander=QueryExpander(synonym_lookup=None),
         multi_query_generator=MultiQueryGenerator(llm_client=llm),
-        hyde_service=HydeService(llm_client=llm, embedder=None),  # TODO: wire embedder
+        hyde_service=HydeService(llm_client=llm, embedder=get_embedder()),
         strategy=BrowsingStrategy(
             retrieval_service=get_retrieval_service(),
             ranking_service=get_ranking_service(),
