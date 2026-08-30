@@ -3,6 +3,7 @@ import Header from './components/Header'
 import Home from './pages/Home'
 import Catalog from './pages/Catalog'
 import Wishlist from './pages/Wishlist'
+import Compare from './pages/Compare'
 
 import './App.css'
 
@@ -15,6 +16,8 @@ function App() {
       {currentPage === 'home' && <Home />}
       {currentPage === 'catalog' && <Catalog />}
       {currentPage === 'wishlist' && <Wishlist />}
+      {currentPage === 'compare' && <Compare />}
+
 
     </div>
   )

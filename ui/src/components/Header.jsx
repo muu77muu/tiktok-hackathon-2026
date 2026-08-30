@@ -22,6 +22,12 @@ export default function Header({ currentPage, setCurrentPage }) {
           >
             Wishlist
           </button>
+                    <button
+            className={`nav-link ${currentPage === 'compare' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('compare')}
+          >
+            Compare
+          </button>
         </nav>
       </div>
     </header>
