@@ -4,6 +4,7 @@ import Home from './pages/Home'
 import Catalog from './pages/Catalog'
 import Wishlist from './pages/Wishlist'
 import Compare from './pages/Compare'
+import ChatBox from './pages/Chatbox'
 
 import './App.css'
 
@@ -17,8 +18,7 @@ function App() {
       {currentPage === 'catalog' && <Catalog />}
       {currentPage === 'wishlist' && <Wishlist />}
       {currentPage === 'compare' && <Compare />}
-
-
+      {currentPage === 'chatbox' && <ChatBox />}
     </div>
   )
 }

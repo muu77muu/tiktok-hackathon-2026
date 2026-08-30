@@ -38,7 +38,7 @@ from app.services.context.context_relevance import ContextRelevance
 from app.services.context.context_distiller import ContextDistiller
 
 # sessions
-from app.services.sessions.sessions_service import SessionService
+from app.services.sessions.session_service import SessionService
 
 # copilot / orchestration
 from app.services.orchestration.intent_router import IntentRouter

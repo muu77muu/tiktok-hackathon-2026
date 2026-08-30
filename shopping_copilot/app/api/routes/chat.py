@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..dependencies import get_orchestration_service, get_session_service
 from app.services.orchestration.orchestration_service import OrchestrationService
-from app.services.sessions.sessions_service import SessionService
+from app.services.sessions.session_service import SessionService
 
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
