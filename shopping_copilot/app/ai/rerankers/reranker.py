@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 @dataclass
 class RankedCandidate:
     product_id: str
