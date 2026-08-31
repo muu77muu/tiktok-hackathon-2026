@@ -1,8 +1,7 @@
 """Evaluator-facing team Agent.
 
-Drives the real team stack: hybrid retrieval (hand-rolled BM25 + numpy
-vector index, fused with RRF) over the local catalog, plus a conversation
-strategy for the organizer's customer simulator:
+Drives the evaluator through stateful local BM25 retrieval and deterministic
+constraint-fidelity reranking over the frozen catalog:
 
 - every turn returns top-10 recommendations AND asks ``ask_attribute:
   "other"`` -- the simulator answers "other" with up to two undisclosed
@@ -11,7 +10,7 @@ strategy for the organizer's customer simulator:
   retrieval query;
 - the intent-override message ("Actually, ignore my earlier preference...")
   drops the original turn-1 preference and adds the new requirement;
-- fused top-50 candidates are re-sorted CPU-side before returning 10:
+- the top BM25 candidates are re-sorted CPU-side before returning 10:
   primary key = how many disclosed constraints appear VERBATIM in the
   product's text (the simulator copies constraints from the gold product's
   own features/details, so the gold matches all of them), secondary key =
@@ -44,9 +43,9 @@ _OVERRIDE_MARK = "What I need is:"
 _LEAK_MARK = "what matters is:"
 
 TOP_K_CAP = 10
-# hybrid retrieval depth fed to the phrase/price re-sort; gold products
-# ranked 11..RETRIEVE_DEPTH by RRF can still be promoted into the scored top-10
-RETRIEVE_DEPTH = 50
+# Retrieval depth fed to the phrase/price re-sort. A controlled public-set
+# sweep selected 200 as the best HitRate/MRR/MTTC composite trade-off.
+RETRIEVE_DEPTH = 200
 BUDGET_WINDOW = 0.15  # candidate price within +/-15% of the disclosed budget
 
 _BUDGET_RE = re.compile(r"\$\s*([0-9]+(?:\.[0-9]+)?)")
@@ -68,14 +67,14 @@ class Agent:
 
         from app.api.dependencies import get_retrieval_service
         from app.infrastructure.search.keyword_index import _product_text
-        from app.infrastructure.search.local_indexes import warm_indexes
+        from app.infrastructure.search.local_indexes import load_keyword_index
         from app.infrastructure.storage.catalog_store import get_catalog_store
 
         self._service = get_retrieval_service()
         self._catalog = get_catalog_store()
         self._full_text = _product_text  # same field coverage as the BM25 index
         self._text_cache: dict[str, str] = {}  # product_id -> normalized text
-        warm_indexes()  # load npz + build BM25 now, not on the first respond
+        load_keyword_index()  # build BM25 now, not on the first respond
         self._sessions: dict[str, dict] = {}
 
     def reset(self, session_id: str, user_profile: dict) -> None:
@@ -137,6 +136,13 @@ class Agent:
 
     # -- organizer contract ----------------------------------------------------
 
+    async def _retrieve_candidates(self, query: str) -> dict:
+        return await self._service.retrieve(
+            query,
+            strategy="keyword",
+            top_k=RETRIEVE_DEPTH,
+        )
+
     def respond(
         self,
         session_id: str,
@@ -157,9 +163,7 @@ class Agent:
 
         recommendations: list[dict] = []
         if query and limit:
-            result = asyncio.run(
-                self._service.retrieve(query, strategy="hybrid", top_k=RETRIEVE_DEPTH)
-            )
+            result = asyncio.run(self._retrieve_candidates(query))
             candidates = [
                 c for c in result.get("candidates", []) if c.get("product_id")
             ]
