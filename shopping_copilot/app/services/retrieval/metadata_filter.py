@@ -38,6 +38,13 @@ class MetadataFilter:
         op = clause.get("op", "eq")
         value = clause.get("value")
 
+        # same special case as infrastructure/search/filtering.record_matches:
+        # "category" matches anywhere in the categories chain, case-insensitively
+        if field == "category":
+            chain = metadata.get("categories") or []
+            terms = {str(c).casefold() for c in chain} if isinstance(chain, list) else set()
+            return str(value).casefold() in terms
+
         actual = self._resolve_field(metadata, field)
         if actual is None:
             return False

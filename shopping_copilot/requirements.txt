@@ -7,3 +7,4 @@ torch
 transformers>=4.51
 sentence-transformers>=2.7
 numpy
+rank-bm25

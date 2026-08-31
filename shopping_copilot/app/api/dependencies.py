@@ -1,8 +1,13 @@
 from functools import lru_cache
 
+from app.core.config import get_supabase_client
 from app.ai.llm.client import LLMClient
 from app.ai.embeddings.embedder import Embedder
 from app.ai.rerankers.reranker import Reranker
+
+# search infrastructure (Supabase-backed)
+from app.infrastructure.search.supabase_vector_index import SupabaseVectorIndex
+from app.infrastructure.search.supabase_bm25_index import SupabaseBM25Index
 
 # buying
 from app.services.buying.constraint_extractor import ConstraintExtractor
@@ -21,6 +26,7 @@ from app.services.browsing.browsing_pipeline import BrowsingPipeline
 
 # retrieval
 from app.services.retrieval.retrieval_service import RetrievalService
+from app.services.retrieval.keyword_retriever import KeywordRetriever
 from app.services.retrieval.vector_retriever import VectorRetriever
 
 # ranking
@@ -66,11 +72,16 @@ def get_session_service() -> SessionService:
     return SessionService()
 
 @lru_cache()
+def get_search_client():
+    return get_supabase_client()
+
+@lru_cache()
 def get_retrieval_service() -> RetrievalService:
+    client = get_search_client()
     return RetrievalService(
-        keyword_retriever=None,  # TODO: wire infrastructure/search/keyword_index.py
+        keyword_retriever=KeywordRetriever(keyword_index=SupabaseBM25Index(client)),
         vector_retriever=VectorRetriever(
-            vector_index=None,  # TODO: wire infrastructure/search/vector_index.py
+            vector_index=SupabaseVectorIndex(client),
             embedder=get_embedder(),
         ),
         category_retriever=None,  # TODO: wire infrastructure/search/category_index.py
