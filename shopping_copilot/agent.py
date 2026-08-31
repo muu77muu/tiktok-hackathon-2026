@@ -10,7 +10,13 @@ strategy for the organizer's customer simulator:
 - constraint leaks ("For that, what matters is: ...") accumulate into the
   retrieval query;
 - the intent-override message ("Actually, ignore my earlier preference...")
-  drops the original turn-1 preference and adds the new requirement.
+  drops the original turn-1 preference and adds the new requirement;
+- fused top-50 candidates are re-sorted CPU-side before returning 10:
+  primary key = how many disclosed constraints appear VERBATIM in the
+  product's text (the simulator copies constraints from the gold product's
+  own features/details, so the gold matches all of them), secondary key =
+  price within range of a disclosed "budget around $X" (X is the gold's
+  exact price), tiebreak = original RRF order.
 
 The organizer-facing reset/respond contract is unchanged.
 """
@@ -19,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -37,6 +44,17 @@ _OVERRIDE_MARK = "What I need is:"
 _LEAK_MARK = "what matters is:"
 
 TOP_K_CAP = 10
+# hybrid retrieval depth fed to the phrase/price re-sort; gold products
+# ranked 11..RETRIEVE_DEPTH by RRF can still be promoted into the scored top-10
+RETRIEVE_DEPTH = 50
+BUDGET_WINDOW = 0.15  # candidate price within +/-15% of the disclosed budget
+
+_BUDGET_RE = re.compile(r"\$\s*([0-9]+(?:\.[0-9]+)?)")
+_NORM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize(text: str) -> str:
+    return _NORM_RE.sub(" ", text.lower()).strip()
 
 
 class Agent:
@@ -49,9 +67,14 @@ class Agent:
             os.environ["CATALOG_PATH"] = str(catalog_path.resolve())
 
         from app.api.dependencies import get_retrieval_service
+        from app.infrastructure.search.keyword_index import _product_text
         from app.infrastructure.search.local_indexes import warm_indexes
+        from app.infrastructure.storage.catalog_store import get_catalog_store
 
         self._service = get_retrieval_service()
+        self._catalog = get_catalog_store()
+        self._full_text = _product_text  # same field coverage as the BM25 index
+        self._text_cache: dict[str, str] = {}  # product_id -> normalized text
         warm_indexes()  # load npz + build BM25 now, not on the first respond
         self._sessions: dict[str, dict] = {}
 
@@ -135,13 +158,13 @@ class Agent:
         recommendations: list[dict] = []
         if query and limit:
             result = asyncio.run(
-                self._service.retrieve(query, strategy="hybrid", top_k=limit)
+                self._service.retrieve(query, strategy="hybrid", top_k=RETRIEVE_DEPTH)
             )
-            recommendations = [
-                {"parent_asin": str(c["product_id"])}
-                for c in result.get("candidates", [])
-                if c.get("product_id")
-            ][:limit]
+            candidates = [
+                c for c in result.get("candidates", []) if c.get("product_id")
+            ]
+            ordered = self._phrase_price_sort(candidates, state["constraints"])
+            recommendations = [{"parent_asin": pid} for pid in ordered[:limit]]
 
         return {
             "message": "Here are my best matches so far -- happy to refine further.",
@@ -149,3 +172,58 @@ class Agent:
             "recommendations": recommendations,
             "usage": {"prompt_tokens": 0, "completion_tokens": 0},
         }
+
+    # -- CPU-side re-sort: verbatim phrase matches, then price window ---------
+
+    def _phrase_price_sort(self, candidates: list[dict], constraints: list[str]) -> list[str]:
+        budget: float | None = None
+        phrases: list[str] = []
+        for constraint in constraints:
+            money = _BUDGET_RE.search(constraint)
+            if money and "budget" in constraint.lower():
+                budget = float(money.group(1))
+                continue
+            phrases.append(constraint)
+
+        keyed = []
+        for position, candidate in enumerate(candidates):
+            product_id = str(candidate["product_id"])
+            text = self._normalized_text(product_id)
+
+            matches = 0
+            for phrase in phrases:
+                variants = [_normalize(phrase)]
+                if ":" in phrase:
+                    # "color: black" -> also try just "black"; product text
+                    # contains the value, not the synthesized label
+                    variants.append(_normalize(phrase.split(":", 1)[1]))
+                if any(v and v in text for v in variants):
+                    matches += 1
+
+            out_of_budget = 0
+            if budget is not None:
+                price = self._price_of(product_id)
+                in_range = price is not None and abs(price - budget) <= BUDGET_WINDOW * budget
+                out_of_budget = 0 if in_range else 1
+
+            # sort ascending: most phrase matches first, in-budget before
+            # out-of-budget, original RRF order as the tiebreak
+            keyed.append((-matches, out_of_budget, position, product_id))
+
+        keyed.sort()
+        return [product_id for *_, product_id in keyed]
+
+    def _normalized_text(self, product_id: str) -> str:
+        cached = self._text_cache.get(product_id)
+        if cached is None:
+            record = self._catalog.get(product_id) or {}
+            cached = _normalize(self._full_text(record))
+            self._text_cache[product_id] = cached
+        return cached
+
+    def _price_of(self, product_id: str) -> float | None:
+        record = self._catalog.get(product_id) or {}
+        try:
+            return float(record.get("price"))
+        except (TypeError, ValueError):
+            return None

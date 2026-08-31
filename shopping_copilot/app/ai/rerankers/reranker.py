@@ -67,8 +67,15 @@ class Reranker:
                     self._tokenizer = AutoTokenizer.from_pretrained(
                         self.model_name, padding_side="left"
                     )
+                    # bf16 on GPU: ~2-4x faster forward passes, negligible
+                    # score drift for a yes/no logit read; CPU stays fp32
+                    dtype = (
+                        torch.bfloat16 if device == "cuda" else torch.float32
+                    )
                     self._model = (
-                        AutoModelForCausalLM.from_pretrained(self.model_name)
+                        AutoModelForCausalLM.from_pretrained(
+                            self.model_name, dtype=dtype
+                        )
                         .to(device)
                         .eval()
                     )
@@ -154,7 +161,15 @@ class Reranker:
         ]
 
     def _document_text(self, candidate: dict) -> str:
+        # title first, then the fields constraints tend to live in; token
+        # truncation eats the tail, so order doubles as priority. List values
+        # (features/description are lists in catalog records) are flattened.
         metadata = candidate.get("metadata") or {}
-        title = metadata.get("title", "")
-        description = metadata.get("description", "")
-        return f"{title}. {description}".strip()
+        parts: list[str] = []
+        for field in ("title", "features", "store", "description"):
+            value = metadata.get(field)
+            if isinstance(value, list):
+                parts.extend(str(item) for item in value if item)
+            elif value:
+                parts.append(str(value))
+        return ". ".join(parts).strip()
