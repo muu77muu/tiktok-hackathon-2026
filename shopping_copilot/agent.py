@@ -41,6 +41,23 @@ _EXPLORING_MARK = ", but I'm still exploring"
 _OVERRIDE_PREFIX = "Actually, ignore my earlier preference"
 _OVERRIDE_MARK = "What I need is:"
 _LEAK_MARK = "what matters is:"
+_PARAPHRASED_OVERRIDE_RE = re.compile(
+    r"\b(?:scratch that|ignore (?:what i said|my earlier preference|that)|"
+    r"no longer|instead of|rather than|changed my mind|"
+    r"forget (?:that|what i said))\b",
+    re.IGNORECASE,
+)
+_NO_PREFERENCE_ONLY_RE = re.compile(
+    r"I don't have (?:a |an additional )preference for [^.;]+"
+    r"(?:; please use your judgment)?\.",
+    re.IGNORECASE,
+)
+
+MAX_INPUT_CHARS = 4096
+MAX_STATE_VALUE_CHARS = 512
+MAX_CONSTRAINTS = 24
+MAX_FALLBACK_TEXT_CHARS = 512
+MAX_FALLBACK_MESSAGES = 4
 
 TOP_K_CAP = 10
 # Retrieval depth fed to the phrase/price re-sort. A controlled public-set
@@ -83,6 +100,7 @@ class Agent:
             "category": "",
             "constraints": [],  # ordered, deduped
             "initial_preference": None,  # turn-1 free preference; dropped on override
+            "fallback_context": [],  # untemplated user text retained for BM25 recall
         }
 
     # -- conversation parsing (mirrors the simulator's fixed templates) -------
@@ -90,12 +108,14 @@ class Agent:
     @staticmethod
     def _add_constraints(state: dict, values: list[str]) -> None:
         for value in values:
-            value = value.strip()
+            if len(state["constraints"]) >= MAX_CONSTRAINTS:
+                break
+            value = " ".join(value.split())[:MAX_STATE_VALUE_CHARS].strip()
             if value and value not in state["constraints"]:
                 state["constraints"].append(value)
 
     def _absorb(self, state: dict, text: str) -> None:
-        text = text.strip()
+        text = " ".join(text.strip()[:MAX_INPUT_CHARS].split())
 
         if text.startswith(_OVERRIDE_PREFIX):
             new_value = text.split(_OVERRIDE_MARK, 1)[-1].strip().rstrip(".").strip()
@@ -104,6 +124,7 @@ class Agent:
                     c for c in state["constraints"] if c != state["initial_preference"]
                 ]
                 state["initial_preference"] = None
+            state["fallback_context"] = []
             self._add_constraints(state, [new_value])
             return
 
@@ -118,21 +139,49 @@ class Agent:
             rest = text[len(_LOOKING_PREFIX):]
             if _REQUIREMENT_MARK in text:
                 category, constraint = rest.split(_REQUIREMENT_MARK.lstrip("."), 1)
-                state["category"] = category.strip(" .")
+                state["category"] = category.strip(" .")[:MAX_STATE_VALUE_CHARS]
                 self._add_constraints(state, [constraint.strip().rstrip(".")])
             elif _EXPLORING_MARK in rest:
-                state["category"] = rest.split(_EXPLORING_MARK, 1)[0].strip()
+                state["category"] = rest.split(_EXPLORING_MARK, 1)[0].strip()[
+                    :MAX_STATE_VALUE_CHARS
+                ]
             elif ". " in rest:
                 category, preference = rest.split(". ", 1)
-                state["category"] = category.strip()
-                preference = preference.strip()
+                state["category"] = category.strip()[:MAX_STATE_VALUE_CHARS]
+                preference = preference.strip()[:MAX_STATE_VALUE_CHARS]
                 if preference:
                     state["initial_preference"] = preference
                     self._add_constraints(state, [preference])
             else:
-                state["category"] = rest.strip(" .")
-        # other messages ("I don't have a preference...", "Ask me about one
-        # specific attribute.") carry no new constraints
+                state["category"] = rest.strip(" .")[:MAX_STATE_VALUE_CHARS]
+            return
+
+        # Evaluator boundary replies and clarification prompts carry no product
+        # evidence. Keep ignoring them rather than polluting the retrieval query.
+        if _NO_PREFERENCE_ONLY_RE.fullmatch(text) or (
+            "ask me about one specific attribute" in lowered
+        ):
+            return
+
+        # Private evaluation or real users may paraphrase the fixed simulator
+        # templates. Preserve otherwise-unrecognized text for BM25, and apply a
+        # conservative override: only the known turn-1 free preference is
+        # removed; already-disclosed hard constraints remain intact.
+        if _PARAPHRASED_OVERRIDE_RE.search(text):
+            if state["initial_preference"] is not None:
+                state["constraints"] = [
+                    c for c in state["constraints"] if c != state["initial_preference"]
+                ]
+                state["initial_preference"] = None
+            # An explicit correction supersedes earlier unstructured messages,
+            # whose individual preference spans cannot be removed reliably.
+            state["fallback_context"] = []
+
+        fallback_text = text[:MAX_FALLBACK_TEXT_CHARS].rstrip()
+        fallback_context = state.setdefault("fallback_context", [])
+        if fallback_text and fallback_text not in fallback_context:
+            fallback_context.append(fallback_text)
+            del fallback_context[:-MAX_FALLBACK_MESSAGES]
 
     # -- organizer contract ----------------------------------------------------
 
@@ -156,9 +205,15 @@ class Agent:
 
         self._absorb(state, str(user_message or ""))
 
-        query = " ".join([state["category"], *state["constraints"]]).strip()
+        query = " ".join([
+            state["category"],
+            *state["constraints"],
+            *state.get("fallback_context", []),
+        ]).strip()
         if not query:
-            query = str(user_message or "").strip()
+            query = " ".join(
+                str(user_message or "").strip()[:MAX_INPUT_CHARS].split()
+            )
         limit = max(0, min(int(top_k), TOP_K_CAP))
 
         recommendations: list[dict] = []
