@@ -19,9 +19,18 @@ def tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
  
 def _product_text(record: dict) -> str:
+    # covers every field the evaluator's intent cards draw constraints from
+    # (title, features, details, store) plus description/categories
     parts = [record.get("title") or ""]
     parts.extend(record.get("features") or [])
     parts.extend(record.get("description") or [])
+    parts.extend(record.get("categories") or [])
+    store = record.get("store")
+    if store:
+        parts.append(str(store))
+    details = record.get("details")
+    if isinstance(details, dict):
+        parts.extend(f"{key} {value}" for key, value in details.items())
     return " ".join(str(p) for p in parts)
  
 @dataclass
@@ -35,6 +44,16 @@ class KeywordIndex:
     _avgdl: float = 0.0
     _n_docs: int = 0
  
+    @classmethod
+    def build_from_records(cls, records: dict[str, dict], k1: float = 1.5, b: float = 0.75) -> "KeywordIndex":
+        """Build from an already-loaded {product_id: record} dict (e.g. the
+        shared CatalogStore) instead of re-parsing the JSONL from disk."""
+        idx = cls(k1=k1, b=b)
+        for product_id, record in records.items():
+            idx.add(product_id, record)
+        idx._finalize()
+        return idx
+
     @classmethod
     def build_from_jsonl(cls, path: str, id_field: str = "parent_asin", k1: float = 1.5, b: float = 0.75) -> "KeywordIndex":
         idx = cls(k1=k1, b=b)

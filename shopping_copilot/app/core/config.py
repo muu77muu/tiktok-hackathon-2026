@@ -1,8 +1,11 @@
 import os
 from functools import lru_cache
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_BASE_DIR = Path(__file__).resolve().parents[2]  # shopping_copilot/
 
 DEFAULTS = {
     "LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -34,6 +37,17 @@ class Settings:
     EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "")
     RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", DEFAULTS["RERANKER_MODEL"])
     RERANKER_DEVICE: str = os.getenv("RERANKER_DEVICE", "")
+
+    # local catalog + indexes (no external DB in the retrieval path)
+    CATALOG_PATH: str = os.getenv(
+        "CATALOG_PATH", str(_BASE_DIR.parent / "starter" / "catalog.jsonl")
+    )
+    VECTOR_INDEX_PATH: str = os.getenv(
+        "VECTOR_INDEX_PATH", str(_BASE_DIR / "data" / "vector_index.npz")
+    )
+    WISHLIST_PATH: str = os.getenv(
+        "WISHLIST_PATH", str(_BASE_DIR / "data" / "wishlist.json")
+    )
 
 
 @lru_cache()

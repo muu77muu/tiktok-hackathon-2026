@@ -115,62 +115,10 @@ async def list_products(
     page_size = min(page_size, 100)
     
     try:
-        # Build count query
-        count_query = products_service.client.table("Catalog").select(
-            "parent_asin", count="exact"
+        data = products_service.list_products(
+            page=page, page_size=page_size, category=category
         )
-        
-        # Apply category filter if provided
-        # Categories are stored as text strings (e.g., "['Clothing', 'Women']")
-        # Use ILIKE for case-insensitive text search
-        if category:
-            # Search for the category name within the categories text field
-            count_query = count_query.filter("categories", "ilike", f"%{category}%")
-        
-        count_response = count_query.execute()
-        total = count_response.count or 0
-        
-        # Calculate offset
-        offset = (page - 1) * page_size
-        
-        # Build data query
-        data_query = products_service.client.table("Catalog").select(
-            "parent_asin, title, price, categories"
-        )
-        
-        # Apply category filter if provided
-        # Categories are stored as text strings (e.g., "['Clothing', 'Women']")
-        if category:
-            # Search for the category name within the categories text field
-            data_query = data_query.filter("categories", "ilike", f"%{category}%")
-        
-        # Apply pagination
-        data_query = data_query.range(offset, offset + page_size - 1)
-        
-        response = data_query.execute()
-        
-        products = []
-        if response.data:
-            for product in response.data:
-                products.append(
-                    ProductListItem(
-                        product_id=product.get("parent_asin"),
-                        title=product.get("title"),
-                        price=safe_parse_price(product.get("price")),
-                        category=product.get("categories"),
-                    )
-                )
-        
-        # Calculate total pages
-        total_pages = (total + page_size - 1) // page_size
-        
-        return PaginatedProductList(
-            items=products,
-            total=total,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages,
-        )
+        return PaginatedProductList(**data)
     except Exception as e:
         logger.error(f"Error fetching products list: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -248,36 +196,8 @@ async def get_available_categories(
         Hierarchical format shows parent-child relationships based on category chains in products.
     """
     try:
-        # Fetch all products with their categories
-        response = products_service.client.table("Catalog").select(
-            "categories"
-        ).execute()
-        
-        category_chains = []
-        
-        if response.data:
-            for product in response.data:
-                categories = product.get("categories")
-                chain = None
-                
-                if isinstance(categories, list):
-                    # Already a list
-                    chain = categories
-                elif isinstance(categories, str):
-                    # Try to parse as JSON/Python list string
-                    try:
-                        # Handle Python list format with single quotes
-                        categories_str = categories.replace("'", '"')
-                        parsed = json.loads(categories_str)
-                        if isinstance(parsed, list):
-                            chain = parsed
-                    except (json.JSONDecodeError, ValueError):
-                        logger.debug(f"Could not parse categories string: {categories}")
-                
-                # Only add non-empty chains
-                if chain:
-                    category_chains.append(chain)
-        
+        category_chains = products_service.get_all_category_chains()
+
         # If flat=True, return flat list like before
         if flat:
             all_categories = set()
@@ -331,16 +251,18 @@ async def get_product(
             detail=f"Product with ID '{product_id}' not found"
         )
     
-    # Map database fields to response model
-    # Supabase columns: parent_asin, title, categories (not category), description, 
-    # price, average_rating (not rating), rating_number, store, features, details
+    # Map catalog fields to response model. Local records keep categories/
+    # description as real lists; the response models expect the stringified
+    # form the old Supabase columns had, so stringify for parity.
+    categories = product.get("categories")
+    description = product.get("description")
     return ProductResponse(
         product_id=product.get("parent_asin"),
         title=product.get("title"),
-        category=product.get("categories"),  # Note: DB column is plural
-        description=product.get("description"),
+        category=str(categories) if categories else None,
+        description=str(description) if description else None,
         price=safe_parse_price(product.get("price")),
-        rating=product.get("average_rating"),  # Note: DB column is average_rating
+        rating=product.get("average_rating"),
         metadata={
             "rating_number": product.get("rating_number"),
             "store": product.get("store"),

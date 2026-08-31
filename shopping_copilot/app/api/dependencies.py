@@ -1,13 +1,15 @@
 from functools import lru_cache
 
-from app.core.config import get_supabase_client
 from app.ai.llm.client import LLMClient
 from app.ai.embeddings.embedder import Embedder
 from app.ai.rerankers.reranker import Reranker
 
-# search infrastructure (Supabase-backed)
-from app.infrastructure.search.supabase_vector_index import SupabaseVectorIndex
-from app.infrastructure.search.supabase_bm25_index import SupabaseBM25Index
+# search infrastructure (local in-memory indexes over catalog.jsonl)
+from app.infrastructure.search.local_indexes import (
+    LazyIndex,
+    load_keyword_index,
+    load_vector_index,
+)
 
 # buying
 from app.services.buying.constraint_extractor import ConstraintExtractor
@@ -72,16 +74,11 @@ def get_session_service() -> SessionService:
     return SessionService()
 
 @lru_cache()
-def get_search_client():
-    return get_supabase_client()
-
-@lru_cache()
 def get_retrieval_service() -> RetrievalService:
-    client = get_search_client()
     return RetrievalService(
-        keyword_retriever=KeywordRetriever(keyword_index=SupabaseBM25Index(client)),
+        keyword_retriever=KeywordRetriever(keyword_index=LazyIndex(load_keyword_index)),
         vector_retriever=VectorRetriever(
-            vector_index=SupabaseVectorIndex(client),
+            vector_index=LazyIndex(load_vector_index),
             embedder=get_embedder(),
         ),
         category_retriever=None,  # TODO: wire infrastructure/search/category_index.py

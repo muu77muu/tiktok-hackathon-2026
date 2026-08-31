@@ -11,12 +11,19 @@ from .filtering import record_matches, to_metadata
 
 DEFAULT_TOP_K = 50
 
-# what gets embeded for each product
+# what gets embeded for each product; features/store included so semantic
+# search sees the same signals the evaluator's intent cards are built from
 def _product_text(record: dict) -> str:
     parts = [record.get("title") or ""]
     categories = record.get("categories") or []
     if categories:
-        parts.append(" ".join(categories))
+        parts.append(" ".join(str(c) for c in categories))
+    features = record.get("features") or []
+    if features:
+        parts.append(" ".join(str(f) for f in features))
+    store = record.get("store")
+    if store:
+        parts.append(str(store))
     return " ".join(str(p) for p in parts).strip()
 
 def _normalize(matrix: np.ndarray) -> np.ndarray:
@@ -80,8 +87,11 @@ class VectorIndex:
         q = _normalize(np.asarray(vector, dtype=np.float32).reshape(1, -1))[0]
         sims = self._matrix @ q  # cosine similarity, both sides normalized
 
+        # walk best-first and stop at top_k: building result dicts for all
+        # 50k rows dominated query latency; argsort itself is a few ms
         results = []
-        for i, product_id in enumerate(self._ids):
+        for i in np.argsort(-sims):
+            product_id = self._ids[i]
             record = self._records.get(product_id, {})
             if not record_matches(record, filters):
                 continue
@@ -90,9 +100,9 @@ class VectorIndex:
                 "score": float(sims[i]),
                 "metadata": to_metadata(record),
             })
-
-        results.sort(key=lambda r: r["score"], reverse=True)
-        return results[:top_k]
+            if len(results) >= top_k:
+                break
+        return results
 
     def save(self, path: str) -> None:
         np.savez_compressed(
