@@ -8,7 +8,7 @@ from app.infrastructure.search.local_indexes import warm_indexes
 
 app = FastAPI(
     title="Shopping Copilot",
-    description=("a CannotTok special"),
+    description="Conversational product-search prototype",
 )
 
 @app.on_event("startup")

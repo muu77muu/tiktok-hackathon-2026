@@ -1,0 +1,1 @@
+-r shopping_copilot/requirements.txt

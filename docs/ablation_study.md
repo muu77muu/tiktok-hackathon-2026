@@ -163,11 +163,7 @@ uses metric-driven routing rather than treating architectural complexity as auto
 The vector and neural ranking paths remain implemented for the hosted demo and documented
 experiments, while official scoring selects the measured best route.
 
-**Known risk to disclose**: the agent's message parsing and phrase matching assume the
-simulator's exact templates and verbatim constraint text. The organizer reserves the right to
-add natural-language paraphrasing on the private set; phrase boost and price filter degrade
-gracefully under it, but template parsing does not — a raw-text query fallback for
-unrecognized messages is the recommended pre-submission hardening.
+**Known remaining risk**: unrecognized messages are now retained as bounded raw-text context, and explicit paraphrased override cues clear stale unstructured preferences. This protects retrieval when the private set changes the fixed simulator wording. The deterministic phrase reranker still rewards literal overlap, however, so unseen synonyms can reduce ranking precision. A lightweight structured paraphrase extractor is the next low-cost improvement to test.
 
 **Judging-criteria support.**
 - *Technical Execution*: 0.820 composite with ≥ 0.900 Hit@10 in every scenario; unchanged

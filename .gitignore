@@ -219,6 +219,7 @@ __marimo__/
 
 # TechJam local evaluator artifacts
 /data/catalog.jsonl
+/data.csv
 /results.json
 
 # local retrieval indexes (built by scripts/build_indexes.py) + local wishlist
